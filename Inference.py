@@ -80,6 +80,23 @@ def parse_args():
     )
     return parser.parse_args()
 
+def sort_slice_files(file_list):
+    """Sort slice files numerically"""
+    return sorted(file_list, key=lambda x: int(''.join(filter(str.isdigit, x))))
+
+def get_mask_from_results(prompt_process):
+    """Extract binary mask from FastSAM results"""
+    ann = prompt_process.everything_prompt()
+    if len(ann) == 0:
+        return None
+    
+    # Combine all detected objects into one mask
+    combined_mask = np.zeros_like(ann[0].cpu().numpy(), dtype=bool)
+    for mask in ann:
+        combined_mask |= mask.cpu().numpy()
+    
+    return combined_mask
+    
 def make_cubic_padded(binary_object, padding_values):
     """
     Convert arbitrary shaped binary object to cubic array with padding
