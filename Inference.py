@@ -288,7 +288,7 @@ def main(args):
     
     # Process 3D objects
     objects_3d = process_3d_objects(mask_stack, 
-                                  min_size=args.min_object_size,
+                                  min_size=20,
                                   padding_values=padding_values)
     
     # Save objects with pickle
