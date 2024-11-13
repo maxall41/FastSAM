@@ -12,7 +12,7 @@ def parse_args():
         "--model_path", type=str, default="./weights/FastSAM.pt", help="model"
     )
     parser.add_argument(
-        "--img_path", type=str, default="./images/dogs.jpg", help="path to image file"
+        "--img_directory", type=str, default="./images/", help="path to image directory"
     )
     parser.add_argument("--imgsz", type=int, default=1024, help="image size")
     parser.add_argument(
@@ -77,42 +77,32 @@ def main(args):
     args.point_prompt = ast.literal_eval(args.point_prompt)
     args.box_prompt = convert_box_xywh_to_xyxy(ast.literal_eval(args.box_prompt))
     args.point_label = ast.literal_eval(args.point_label)
-    input = Image.open(args.img_path)
-    input = input.convert("RGB")
-    everything_results = model(
-        input,
-        device=args.device,
-        retina_masks=args.retina,
-        imgsz=args.imgsz,
-        conf=args.conf,
-        iou=args.iou    
+    for image in os.listdir(args.img_directory):
+        img_path = f"{args.img_directory}{image}"
+        input = Image.open(img_path)
+        input = input.convert("RGB")
+        everything_results = model(
+            input,
+            device=args.device,
+            retina_masks=args.retina,
+            imgsz=args.imgsz,
+            conf=args.conf,
+            iou=args.iou    
         )
-    bboxes = None
-    points = None
-    point_label = None
-    prompt_process = FastSAMPrompt(input, everything_results, device=args.device)
-    if args.box_prompt[0][2] != 0 and args.box_prompt[0][3] != 0:
-            ann = prompt_process.box_prompt(bboxes=args.box_prompt)
-            bboxes = args.box_prompt
-    elif args.text_prompt != None:
-        ann = prompt_process.text_prompt(text=args.text_prompt)
-    elif args.point_prompt[0] != [0, 0]:
-        ann = prompt_process.point_prompt(
-            points=args.point_prompt, pointlabel=args.point_label
-        )
-        points = args.point_prompt
-        point_label = args.point_label
-    else:
+        bboxes = None
+        points = None
+        point_label = None
+        prompt_process = FastSAMPrompt(input, everything_results, device=args.device)
         ann = prompt_process.everything_prompt()
-    prompt_process.plot(
-        annotations=ann,
-        output_path=args.output+args.img_path.split("/")[-1],
-        bboxes = bboxes,
-        points = points,
-        point_label = point_label,
-        withContours=args.withContours,
-        better_quality=args.better_quality,
-    )
+        prompt_process.plot(
+            annotations=ann,
+            output_path=args.output+args.img_path.split("/")[-1],
+            bboxes = bboxes,
+            points = points,
+            point_label = point_label,
+            withContours=args.withContours,
+            better_quality=args.better_quality,
+        )
 
 
 
