@@ -90,10 +90,14 @@ def get_mask_from_results(prompt_process):
     if len(ann) == 0:
         return None
     
+    # Initialize combined mask with correct type
+    first_mask = ann[0].cpu().numpy().astype(bool)
+    combined_mask = np.zeros_like(first_mask, dtype=bool)
+    
     # Combine all detected objects into one mask
-    combined_mask = np.zeros_like(ann[0].cpu().numpy(), dtype=bool)
     for mask in ann:
-        combined_mask |= mask.cpu().numpy()
+        mask_np = mask.cpu().numpy().astype(bool)
+        combined_mask |= mask_np
     
     return combined_mask
     
