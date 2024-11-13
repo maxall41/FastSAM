@@ -12,7 +12,7 @@ def parse_args():
         "--model_path", type=str, default="./weights/FastSAM.pt", help="model"
     )
     parser.add_argument(
-        "--img_path", type=str, default="./images/dogs.jpg", help="path to image file"
+        "--img_directory", type=str, default="./images/", help="path to image directory"
     )
     parser.add_argument("--imgsz", type=int, default=1024, help="image size")
     parser.add_argument(
