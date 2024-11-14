@@ -10,6 +10,27 @@ from scipy import ndimage
 from skimage import measure
 import pickle
 
+def sort_slice_files(file_list):
+    """Sort slice files numerically"""
+    return sorted(file_list, key=lambda x: int(''.join(filter(str.isdigit, x))))
+
+def get_mask_from_results(prompt_process):
+    """Extract binary mask from FastSAM results"""
+    ann = prompt_process.everything_prompt()
+    if len(ann) == 0:
+        return None
+    
+    # Initialize combined mask with correct type
+    first_mask = ann[0].cpu().numpy().astype(bool)
+    combined_mask = np.zeros_like(first_mask, dtype=bool)
+    
+    # Combine all detected objects into one mask
+    for mask in ann:
+        mask_np = mask.cpu().numpy().astype(bool)
+        combined_mask |= mask_np
+    
+    return combined_mask
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
