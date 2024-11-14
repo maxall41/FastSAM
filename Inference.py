@@ -14,6 +14,25 @@ def sort_slice_files(file_list):
     """Sort slice files numerically"""
     return sorted(file_list, key=lambda x: int(''.join(filter(str.isdigit, x))))
 
+def get_minimal_bounding_box(binary_mask):
+    """Get the minimal bounding box that contains the object"""
+    # Find non-zero indices
+    z_indices, y_indices, x_indices = np.nonzero(binary_mask)
+    
+    if len(z_indices) == 0:
+        return None, None
+        
+    # Get min and max for each dimension
+    min_z, max_z = np.min(z_indices), np.max(z_indices) + 1
+    min_y, max_y = np.min(y_indices), np.max(y_indices) + 1
+    min_x, max_x = np.min(x_indices), np.max(x_indices) + 1
+    
+    # Extract minimal box
+    minimal_box = binary_mask[min_z:max_z, min_y:max_y, min_x:max_x]
+    bbox_coords = (min_z, min_y, min_x, max_z, max_y, max_x)
+    
+    return minimal_box, bbox_coords
+    
 def get_mask_from_results(prompt_process):
     """Extract binary mask from FastSAM results"""
     ann = prompt_process.everything_prompt()
