@@ -79,95 +79,61 @@ def parse_args():
         help="RGB padding values for cubic padding (comma-separated)"
     )
     return parser.parse_args()
-
-def sort_slice_files(file_list):
-    """Sort slice files numerically"""
-    return sorted(file_list, key=lambda x: int(''.join(filter(str.isdigit, x))))
-
-def get_mask_from_results(prompt_process):
-    """Extract binary mask from FastSAM results"""
-    ann = prompt_process.everything_prompt()
-    if len(ann) == 0:
-        return None
     
-    # Initialize combined mask with correct type
-    first_mask = ann[0].cpu().numpy().astype(bool)
-    combined_mask = np.zeros_like(first_mask, dtype=bool)
-    
-    # Combine all detected objects into one mask
-    for mask in ann:
-        mask_np = mask.cpu().numpy().astype(bool)
-        combined_mask |= mask_np
-    
-    return combined_mask
-    
-def make_cubic_padded(binary_object, padding_values):
+def get_original_colors(binary_mask, original_images, bbox_coords):
     """
-    Convert arbitrary shaped binary object to cubic array with padding
+    Extract original colors from CryoET data for the segmented object
     
     Args:
-        binary_object: Original binary object of arbitrary shape
-        padding_values: Tuple of (R,G,B) values for padding
+        binary_mask: 3D binary mask of the object
+        original_images: List of original image arrays
+        bbox_coords: (min_z, min_y, min_x, max_z, max_y, max_x)
+    
+    Returns:
+        Array of original colors within the bounding box where mask is True
+    """
+    min_z, min_y, min_x, max_z, max_y, max_x = bbox_coords
+    colored_object = np.zeros(binary_mask.shape + (3,), dtype=np.uint8)
+    
+    for z in range(max_z - min_z):
+        if min_z + z >= len(original_images):
+            continue
+        orig_img = np.array(original_images[min_z + z])
+        slice_colors = orig_img[min_y:max_y, min_x:max_x]
+        colored_object[z][binary_mask[z]] = slice_colors[binary_mask[z]]
+    
+    return colored_object
+
+def get_slice_info(binary_mask, start_slice):
+    """
+    Get information about which slices contain the object
+    
+    Args:
+        binary_mask: 3D binary mask of the object
+        start_slice: Global slice index where this object starts
         
     Returns:
-        Cubic padded array with original object centered
+        Dictionary with slice information
     """
-    # Get dimensions
-    z, y, x = binary_object.shape
-    max_dim = max(z, y, x)
-    
-    # Calculate padding for each dimension
-    pad_z = (max_dim - z) // 2
-    pad_y = (max_dim - y) // 2
-    pad_x = (max_dim - x) // 2
-    
-    # Account for odd dimensions
-    pad_z_end = max_dim - z - pad_z
-    pad_y_end = max_dim - y - pad_y
-    pad_x_end = max_dim - x - pad_x
-    
-    # Create padded array with RGB channels
-    padded = np.full((max_dim, max_dim, max_dim, 3), padding_values, dtype=np.uint8)
-    
-    # Place original object in center
-    z_start, z_end = pad_z, pad_z + z
-    y_start, y_end = pad_y, pad_y + y
-    x_start, x_end = pad_x, pad_x + x
-    
-    # Set voxels where binary_object is True to 0
-    for i in range(3):  # For each RGB channel
-        padded[z_start:z_end, y_start:y_end, x_start:x_end, i][binary_object] = 0
-        
-    return padded, (z_start, y_start, x_start)
+    slice_info = {}
+    for z in range(binary_mask.shape[0]):
+        if np.any(binary_mask[z]):
+            global_slice = start_slice + z
+            slice_mask = binary_mask[z].astype(np.uint8)
+            slice_info[global_slice] = {
+                'present': True,
+                'mask': slice_mask,
+                'pixel_count': np.sum(slice_mask)
+            }
+    return slice_info
 
-def get_minimal_bounding_box(binary_mask):
-    """Get the minimal bounding box that contains the object"""
-    # Find non-zero indices
-    z_indices, y_indices, x_indices = np.nonzero(binary_mask)
-    
-    if len(z_indices) == 0:
-        return None, None
-        
-    # Get min and max for each dimension
-    min_z, max_z = np.min(z_indices), np.max(z_indices) + 1
-    min_y, max_y = np.min(y_indices), np.max(y_indices) + 1
-    min_x, max_x = np.min(x_indices), np.max(x_indices) + 1
-    
-    # Extract minimal box
-    minimal_box = binary_mask[min_z:max_z, min_y:max_y, min_x:max_x]
-    bbox_coords = (min_z, min_y, min_x, max_z, max_y, max_x)
-    
-    return minimal_box, bbox_coords
-
-def process_3d_objects(binary_stack, min_size=100, padding_values=(255,100,255)):
+def process_3d_objects(binary_stack, original_images, min_size=100):
     """
-    Process 3D binary stack to identify and separate unique objects
-    Returns: List of dictionaries containing object information including minimal shapes
+    Process 3D binary stack to identify and separate unique objects with original colors
     """
     # Label connected components in 3D
     labeled_stack, num_features = ndimage.label(binary_stack)
     
-    # Measure properties of labeled regions
     objects_3d = []
     
     for label in range(1, num_features + 1):
@@ -182,7 +148,13 @@ def process_3d_objects(binary_stack, min_size=100, padding_values=(255,100,255))
         minimal_box, bbox_coords = get_minimal_bounding_box(object_mask)
         if minimal_box is None:
             continue
-            
+        
+        # Get slice information
+        slice_info = get_slice_info(minimal_box, bbox_coords[0])
+        
+        # Get original colors for the object
+        colored_object = get_original_colors(minimal_box, original_images, bbox_coords)
+        
         # Calculate center of mass in global coordinates
         z_indices, y_indices, x_indices = np.nonzero(object_mask)
         center = (
@@ -191,13 +163,10 @@ def process_3d_objects(binary_stack, min_size=100, padding_values=(255,100,255))
             np.mean(x_indices)
         )
         
-        # Create cubic padded version
-        padded_object, padding_offset = make_cubic_padded(minimal_box, padding_values)
-        
         objects_3d.append({
             'minimal_shape': minimal_box,
-            'cubic_padded': padded_object,
-            'padding_offset': padding_offset,
+            'colored_minimal_shape': colored_object,
+            'slice_info': slice_info,
             'bbox_coords': bbox_coords,
             'center': center,
             'size': np.sum(minimal_box)
@@ -210,12 +179,13 @@ def save_objects_pickle(objects, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Create a dictionary with all centers and summary information
+    # Create a dictionary with summary information
     summary_dict = {
         'centers': [obj['center'] for obj in objects],
         'sizes': [obj['size'] for obj in objects],
         'bbox_coords': [obj['bbox_coords'] for obj in objects],
-        'padding_offsets': [obj['padding_offset'] for obj in objects]
+        'slice_ranges': [(min(obj['slice_info'].keys()), max(obj['slice_info'].keys())) 
+                        for obj in objects]
     }
     
     # Save summary information
@@ -225,9 +195,9 @@ def save_objects_pickle(objects, output_dir):
     # Save individual objects with their full information
     for i, obj in enumerate(objects):
         obj_dict = {
-            'minimal_shape': obj['minimal_shape'],  # Original arbitrary shape
-            'cubic_padded': obj['cubic_padded'],   # Cubic padded version
-            'padding_offset': obj['padding_offset'],
+            'minimal_shape': obj['minimal_shape'],  # Binary mask
+            'colored_minimal_shape': obj['colored_minimal_shape'],  # Original colors
+            'slice_info': obj['slice_info'],  # Per-slice information
             'bbox_coords': obj['bbox_coords'],
             'center': obj['center'],
             'size': obj['size']
@@ -239,11 +209,13 @@ def main(args):
     # Create output directory if it doesn't exist
     os.makedirs(args.output, exist_ok=True)
     
-    # Parse padding values
-    padding_values = tuple(map(int, args.padding_value.split(',')))
-    
     # Load model
-    model = FastSAM(args.model_path)
+    try:
+        model = FastSAM(args.model_path, weights_only=True)
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return
+        
     args.point_prompt = ast.literal_eval(args.point_prompt)
     args.box_prompt = convert_box_xywh_to_xyxy(ast.literal_eval(args.box_prompt))
     args.point_label = ast.literal_eval(args.point_label)
@@ -252,44 +224,48 @@ def main(args):
     image_files = sort_slice_files([f for f in os.listdir(args.img_directory) 
                                   if f.endswith(('.png', '.tif', '.tiff', '.jpg', '.jpeg'))])
     
-    # Initialize 3D stack for masks
+    # Initialize 3D stack for masks and store original images
     first_image = Image.open(os.path.join(args.img_directory, image_files[0]))
     stack_shape = (len(image_files), first_image.size[1], first_image.size[0])
     mask_stack = np.zeros(stack_shape, dtype=bool)
+    original_images = []
     
     # Process each slice
     for z, image_file in enumerate(image_files):
-        img_path = os.path.join(args.img_directory, image_file)
-        input_image = Image.open(img_path).convert("RGB")
-        
-        # Get FastSAM results
-        everything_results = model(
-            input_image,
-            device=args.device,
-            retina_masks=args.retina,
-            imgsz=args.imgsz,
-            conf=args.conf,
-            iou=args.iou    
-        )
-        
-        # Process results and get mask
-        prompt_process = FastSAMPrompt(input_image, everything_results, device=args.device)
-        mask = get_mask_from_results(prompt_process)
-        
-        if mask is not None:
-            mask_stack[z] = mask
-        
-        # Save intermediate visualization if needed
-        prompt_process.plot(
-            annotations=prompt_process.everything_prompt(),
-            output_path=os.path.join(args.output, f"slice_{z:04d}.png"),
-            better_quality=args.better_quality,
-        )
+        try:
+            img_path = os.path.join(args.img_directory, image_file)
+            input_image = Image.open(img_path).convert("RGB")
+            original_images.append(input_image)  # Store original image
+            
+            everything_results = model(
+                input_image,
+                device=args.device,
+                retina_masks=args.retina,
+                imgsz=args.imgsz,
+                conf=args.conf,
+                iou=args.iou    
+            )
+            
+            prompt_process = FastSAMPrompt(input_image, everything_results, device=args.device)
+            mask = get_mask_from_results(prompt_process)
+            
+            if mask is not None:
+                mask_stack[z] = mask
+            
+            # Save intermediate visualization if needed
+            if args.save_intermediates:
+                prompt_process.plot(
+                    annotations=prompt_process.everything_prompt(),
+                    output_path=os.path.join(args.output, f"slice_{z:04d}.png"),
+                    better_quality=args.better_quality,
+                )
+        except Exception as e:
+            print(f"Error processing slice {z} ({image_file}): {e}")
+            continue
     
-    # Process 3D objects
-    objects_3d = process_3d_objects(mask_stack, 
-                                  min_size=20,
-                                  padding_values=padding_values)
+    # Process 3D objects with original colors
+    objects_3d = process_3d_objects(mask_stack, original_images, 
+                                  min_size=100)
     
     # Save objects with pickle
     save_objects_pickle(objects_3d, os.path.join(args.output, '3d_objects'))
@@ -300,10 +276,9 @@ def main(args):
         print(f"\nObject {i}:")
         print(f"  Size: {obj['size']} voxels")
         print(f"  Center (z,y,x): ({obj['center'][0]:.1f}, {obj['center'][1]:.1f}, {obj['center'][2]:.1f})")
-        print(f"  Original shape: {obj['minimal_shape'].shape}")
-        print(f"  Cubic padded shape: {obj['cubic_padded'].shape}")
-        print(f"  Padding offset: {obj['padding_offset']}")
+        print(f"  Present in slices: {min(obj['slice_info'].keys())} to {max(obj['slice_info'].keys())}")
         print(f"  Bounding box coords: {obj['bbox_coords']}")
+
 
 if __name__ == "__main__":
     args = parse_args()
