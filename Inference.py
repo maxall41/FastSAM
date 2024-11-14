@@ -211,7 +211,7 @@ def main(args):
     
     # Load model
     try:
-        model = FastSAM(args.model_path, weights_only=True)
+        model = FastSAM(args.model_path)
     except Exception as e:
         print(f"Error loading model: {e}")
         return
