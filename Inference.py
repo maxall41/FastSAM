@@ -274,12 +274,12 @@ def main(args):
                 mask_stack[z] = mask
             
             # Save intermediate visualization if needed
-            if args.save_intermediates:
-                prompt_process.plot(
-                    annotations=prompt_process.everything_prompt(),
-                    output_path=os.path.join(args.output, f"slice_{z:04d}.png"),
-                    better_quality=args.better_quality,
-                )
+            # if args.save_intermediates:
+            #     prompt_process.plot(
+            #         annotations=prompt_process.everything_prompt(),
+            #         output_path=os.path.join(args.output, f"slice_{z:04d}.png"),
+            #         better_quality=args.better_quality,
+            #     )
         except Exception as e:
             print(f"Error processing slice {z} ({image_file}): {e}")
             continue
